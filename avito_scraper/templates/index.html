@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Авито парсер — Сочи</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; color: #333; padding: 20px; }
+.container { max-width: 720px; margin: 0 auto; }
+h1 { font-size: 1.4em; margin-bottom: 20px; }
+.card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+.card h2 { font-size: 1.1em; margin-bottom: 12px; color: #555; }
+.row { display: flex; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+.field { display: flex; flex-direction: column; flex: 1; min-width: 140px; }
+.field.full { flex: 100%; }
+label { font-size: .85em; color: #666; margin-bottom: 4px; }
+input, select { padding: 8px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: .95em; }
+input:focus, select:focus { outline: none; border-color: #4a9eff; }
+.check-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.check-row input { width: auto; }
+button { padding: 10px 28px; border: none; border-radius: 6px; font-size: 1em; cursor: pointer; }
+.btn-start { background: #4a9eff; color: #fff; }
+.btn-start:hover { background: #3a8eef; }
+.btn-start:disabled { background: #aaa; cursor: not-allowed; }
+.btn-pause { background: #f39c12; color: #fff; }
+.btn-pause:hover { background: #e08e0b; }
+.btn-resume { background: #27ae60; color: #fff; }
+.btn-resume:hover { background: #229954; }
+.btn-stop { background: #e74c3c; color: #fff; }
+.btn-stop:hover { background: #d6402e; }
+.btn-download { background: #34c759; color: #fff; text-decoration: none; display: inline-block; padding: 10px 28px; border-radius: 6px; }
+.btn-download:hover { background: #2db84e; }
+#status-box { min-height: 40px; }
+.status-text { font-size: .95em; margin-bottom: 6px; }
+.progress-wrap { display: none; margin: 10px 0; }
+.progress-track { width: 100%; height: 18px; background: #e9e9e9; border-radius: 9px; overflow: hidden; position: relative; }
+.progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #4a9eff, #34c759); border-radius: 9px; transition: width .4s ease; }
+.progress-fill.indeterminate { width: 35% !important; position: absolute; animation: indeterminate 1.2s infinite ease-in-out; }
+@keyframes indeterminate { 0% { left: -35%; } 100% { left: 100%; } }
+.progress-label { font-size: .8em; color: #888; margin-top: 4px; text-align: right; }
+.status-text.running { color: #e67e22; }
+.status-text.done { color: #27ae60; }
+.status-text.error { color: #e74c3c; }
+#log { max-height: 300px; overflow-y: auto; font-size: .82em; font-family: monospace; background: #1e1e1e; color: #d4d4d4; padding: 10px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; display: none; }
+.actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<div class="container">
+<h1>Парсер недвижимости Авито (Сочи)</h1>
+
+<form id="form" method="post" action="/start">
+<div class="card">
+    <h2>Основные</h2>
+    <div class="row">
+        <div class="field">
+            <label for="category">Категория</label>
+            <select name="category" id="category">
+                {% for key, cat in categories.items() %}
+                <option value="{{ key }}">{{ cat.title }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="field">
+            <label for="max_pages">Макс. страниц (0 = все)</label>
+            <input type="number" name="max_pages" id="max_pages" value="2" min="0">
+        </div>
+        <div class="field">
+            <label for="max_listings">Макс. объявлений (пусто = все)</label>
+            <input type="number" name="max_listings" id="max_listings" value="" min="0">
+        </div>
+    </div>
+    <div class="check-row">
+        <input type="checkbox" name="fetch_cards" id="fetch_cards" checked>
+        <label for="fetch_cards">Загружать карточки (доп. параметры: отделка, санузел, окна…). Адрес и координаты есть и без них — из списка.</label>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Задержки и блокировки</h2>
+    <div class="row">
+        <div class="field">
+            <label for="delay_min">Задержка мин. (сек)</label>
+            <input type="number" name="delay_min" id="delay_min" value="5" min="0" step="0.5">
+        </div>
+        <div class="field">
+            <label for="delay_max">Задержка макс. (сек)</label>
+            <input type="number" name="delay_max" id="delay_max" value="10" min="0" step="0.5">
+        </div>
+        <div class="field">
+            <label for="timeout">Таймаут (сек)</label>
+            <input type="number" name="timeout" id="timeout" value="60" min="5">
+        </div>
+        <div class="field">
+            <label for="retries">Ретраи (сеть)</label>
+            <input type="number" name="retries" id="retries" value="2" min="0">
+        </div>
+    </div>
+    <div class="row">
+        <div class="field">
+            <label for="block_cooldown">Cooldown при блоке (сек)</label>
+            <input type="number" name="block_cooldown" id="block_cooldown" value="60" min="5">
+        </div>
+        <div class="field">
+            <label for="block_max_retries">Макс. повторов при блоке</label>
+            <input type="number" name="block_max_retries" id="block_max_retries" value="3" min="0">
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Прокси</h2>
+    <div class="row">
+        <div class="field full">
+            <label for="proxy">Прокси (для всех запросов; пусто = напрямую)</label>
+            <input type="text" name="proxy" id="proxy" placeholder="http://user:pass@host:port  или  socks5://user:pass@host:port">
+        </div>
+    </div>
+    <div style="font-size:.8em;color:#888;margin-top:4px">
+        Применяется и к HTTP, и к HTTPS. Авито работает по HTTPS — одного этого поля достаточно.
+        Для socks-прокси нужен пакет <code>httpx[socks]</code>.
+    </div>
+    <div class="row" style="margin-top:10px">
+        <div class="field full">
+            <label for="rotate_ip_url">URL смены IP (опц.) — дёргается при блоке</label>
+            <input type="text" name="rotate_ip_url" id="rotate_ip_url"
+                placeholder="https://changeip.mobileproxy.space/?proxy_key=...&format=json">
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>User-Agent</h2>
+    <div class="row">
+        <div class="field full">
+            <input type="text" name="user_agent" id="user_agent"
+                value="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36">
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="actions">
+        <button type="submit" class="btn-start" id="btn-start">Запустить парсер</button>
+        <button type="button" class="btn-pause" id="btn-pause" style="display:none">Пауза</button>
+        <button type="button" class="btn-resume" id="btn-resume" style="display:none">Продолжить (применить изменения)</button>
+        <button type="button" class="btn-stop" id="btn-stop" style="display:none">Стоп</button>
+        <a href="/download" class="btn-download" id="btn-download" style="display:none">Скачать результат</a>
+    </div>
+
+    <div id="status-box" style="margin-top: 14px">
+        <div class="status-text" id="status-text"></div>
+        <div class="progress-wrap" id="progress-wrap">
+            <div class="progress-track">
+                <div class="progress-fill" id="progress-fill"></div>
+            </div>
+            <div class="progress-label" id="progress-label"></div>
+        </div>
+    </div>
+    <div id="log"></div>
+</div>
+</form>
+</div>
+
+<script>
+let polling = null;
+
+const form = document.getElementById('form');
+
+form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    document.getElementById('btn-download').style.display = 'none';
+    document.getElementById('log').style.display = 'block';
+    document.getElementById('log').textContent = '';
+    document.getElementById('progress-wrap').style.display = 'block';
+    setButtons('running');
+    setStatus('Запуск…', 'running');
+
+    fetch('/start', { method: 'POST', body: new FormData(form) })
+        .then(r => { startPolling(); })
+        .catch(err => { setStatus('Ошибка: ' + err, 'error'); setButtons('idle'); });
+});
+
+document.getElementById('btn-pause').addEventListener('click', function() {
+    fetch('/pause', { method: 'POST' }).then(() => { setButtons('paused'); setStatus('Пауза', ''); });
+});
+
+document.getElementById('btn-resume').addEventListener('click', function() {
+    fetch('/resume', { method: 'POST', body: new FormData(form) })
+        .then(() => { setButtons('running'); setStatus('Продолжаю…', 'running'); startPolling(); });
+});
+
+document.getElementById('btn-stop').addEventListener('click', function() {
+    if (!confirm('Остановить парсинг? Собранные данные сохранятся.')) return;
+    fetch('/stop', { method: 'POST' }).then(() => setStatus('Останавливаю…', 'running'));
+});
+
+function setButtons(status) {
+    const start = document.getElementById('btn-start');
+    const pause = document.getElementById('btn-pause');
+    const resume = document.getElementById('btn-resume');
+    const stop = document.getElementById('btn-stop');
+    const running = status === 'running';
+    const paused = status === 'paused';
+    start.style.display = (running || paused) ? 'none' : 'inline-block';
+    start.disabled = running || paused;
+    pause.style.display = running ? 'inline-block' : 'none';
+    resume.style.display = paused ? 'inline-block' : 'none';
+    stop.style.display = (running || paused) ? 'inline-block' : 'none';
+}
+
+function startPolling() {
+    if (polling) clearInterval(polling);
+    polling = setInterval(fetchStatus, 1500);
+}
+
+function fetchStatus() {
+    fetch('/status').then(r => r.json()).then(data => {
+        setStatus(data.progress, data.status);
+        updateProgress(data);
+        const logEl = document.getElementById('log');
+        logEl.textContent = data.log.join('\n');
+        logEl.scrollTop = logEl.scrollHeight;
+
+        if (data.status === 'done') {
+            clearInterval(polling);
+            setButtons('idle');
+            if (data.result_file) {
+                const dl = document.getElementById('btn-download');
+                dl.style.display = 'inline-block';
+                dl.textContent = 'Скачать результат (' + data.total + ' объявлений)';
+            }
+        } else if (data.status === 'error') {
+            clearInterval(polling);
+            setButtons('idle');
+        } else {
+            setButtons(data.status);
+        }
+    });
+}
+
+function setStatus(text, cls) {
+    const el = document.getElementById('status-text');
+    el.textContent = text;
+    el.className = 'status-text ' + (cls || '');
+}
+
+function updateProgress(data) {
+    const wrap = document.getElementById('progress-wrap');
+    const fill = document.getElementById('progress-fill');
+    const label = document.getElementById('progress-label');
+
+    if (data.status === 'error') {
+        wrap.style.display = 'none';
+        return;
+    }
+    wrap.style.display = 'block';
+
+    if (data.status === 'done') {
+        fill.classList.remove('indeterminate');
+        fill.style.width = '100%';
+        label.textContent = data.total + ' объявлений — готово';
+        return;
+    }
+
+    const done = data.done_count || 0;
+    const total = data.est_total;
+    if (total && total > 0) {
+        const pct = Math.min(100, Math.round(done / total * 100));
+        fill.classList.remove('indeterminate');
+        fill.style.width = pct + '%';
+        label.textContent = done + ' / ' + total + ' (' + pct + '%)';
+    } else {
+        fill.classList.add('indeterminate');
+        label.textContent = 'Обработано: ' + done;
+    }
+}
+
+fetch('/status').then(r => r.json()).then(data => {
+    if (data.status === 'running' || data.status === 'paused') {
+        setButtons(data.status);
+        setStatus(data.progress, data.status === 'paused' ? '' : 'running');
+        document.getElementById('log').style.display = 'block';
+        document.getElementById('log').textContent = data.log.join('\n');
+        document.getElementById('progress-wrap').style.display = 'block';
+        updateProgress(data);
+        startPolling();
+    } else if (data.status === 'done' && data.result_file) {
+        setStatus(data.progress, 'done');
+        updateProgress(data);
+        const dl = document.getElementById('btn-download');
+        dl.style.display = 'inline-block';
+        dl.textContent = 'Скачать результат (' + data.total + ' объявлений)';
+    }
+});
+</script>
+</body>
+</html>
